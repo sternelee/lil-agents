@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Provider
 
 enum AgentProvider: String, CaseIterable {
-    case claude, codex, copilot, gemini, opencode
+    case claude, codex, copilot, gemini, opencode, openclaw
 
     private static let defaultsKey = "selectedProvider"
 
@@ -24,6 +24,7 @@ enum AgentProvider: String, CaseIterable {
         case .copilot:  return "Copilot"
         case .gemini:   return "Gemini"
         case .opencode: return "OpenCode"
+        case .openclaw: return "OpenClaw"
         }
     }
 
@@ -52,6 +53,8 @@ enum AgentProvider: String, CaseIterable {
             return "To install, run this in Terminal:\n  npm install -g @google/gemini-cli\n\nThen authenticate:\n  gemini auth"
         case .opencode:
             return "To install, run this in Terminal:\n  curl -fsSL https://opencode.ai/install | bash"
+        case .openclaw:
+            return "To install, run this in Terminal:\n  curl -fsSL https://openclaw.ai/install | bash"
         }
     }
 
@@ -62,6 +65,7 @@ enum AgentProvider: String, CaseIterable {
         case .copilot:  return CopilotSession()
         case .gemini:   return GeminiSession()
         case .opencode: return OpenCodeSession()
+        case .openclaw: return OpenClawSession()
         }
     }
 }
