@@ -19,6 +19,7 @@ class OpenClawSession: AgentSession {
     var onProcessExit: (() -> Void)?
 
     var history: [AgentMessage] = []
+    private var typewriterGeneration = 0
 
     // MARK: - Lifecycle
 
@@ -53,6 +54,7 @@ class OpenClawSession: AgentSession {
         guard isRunning, let binaryPath = Self.binaryPath else { return }
         isBusy = true
         currentResponseText = ""
+        typewriterGeneration += 1
         history.append(AgentMessage(role: .user, text: message))
         lineBuffer = ""
 
@@ -121,6 +123,7 @@ class OpenClawSession: AgentSession {
     }
 
     func terminate() {
+        typewriterGeneration += 1
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
         process?.terminate()
@@ -222,7 +225,7 @@ class OpenClawSession: AgentSession {
                     print("[OpenClaw] Extracted text: \(text)")
                     #endif
                     currentResponseText += text
-                    onText?(text)
+                    emitTypewriter(text)
                 }
             }
             // Done with payloads
@@ -238,11 +241,11 @@ class OpenClawSession: AgentSession {
         case "text", "content":
             if let content = json["content"] as? String {
                 currentResponseText += content
-                onText?(content)
+                emitTypewriter(content)
             } else if let part = json["part"] as? [String: Any],
                let text = part["text"] as? String {
                 currentResponseText += text
-                onText?(text)
+                emitTypewriter(text)
             }
 
         case "step_start":
@@ -271,5 +274,34 @@ class OpenClawSession: AgentSession {
         default:
             break
         }
+    }
+
+    // MARK: - Typewriter
+
+    private func emitTypewriter(_ text: String) {
+        let chunks = typewriterChunks(text)
+        let generation = typewriterGeneration
+        let intervalMs = 18
+        for (i, chunk) in chunks.enumerated() {
+            let delay = DispatchTimeInterval.milliseconds(i * intervalMs)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, self.typewriterGeneration == generation else { return }
+                self.onText?(chunk)
+            }
+        }
+    }
+
+    private func typewriterChunks(_ text: String) -> [String] {
+        var chunks: [String] = []
+        var current = ""
+        for char in text {
+            current.append(char)
+            if char == " " || char == "\n" {
+                chunks.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { chunks.append(current) }
+        return chunks
     }
 }
