@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Open `lil-agents.xcodeproj` in Xcode and build the `LilAgents` scheme. No command-line build system is configured.
 
+For detailed build commands, code style guidelines, and conventions, see **AGENTS.md**.
+
 ## Architecture Overview
 
 This is a macOS AppKit application that displays animated characters walking on the Dock, providing a GUI for AI CLI tools.
@@ -21,7 +23,7 @@ This is a macOS AppKit application that displays animated characters walking on 
 
 **`AgentSession`** — Protocol for CLI interaction. Each provider has a session class:
 - `ClaudeSession` — NDJSON streaming (`--output-format stream-json`)
-- `CodexSession`, `CopilotSession`, `GeminiSession`, `OpenCodeSession` — similar patterns
+- `CodexSession`, `CopilotSession`, `GeminiSession`, `OpenCodeSession`, `OpenClawSession` — similar patterns
 
 **`ShellEnvironment`** — Resolves user's login shell PATH via `/bin/zsh -l -i -c env` to locate CLI binaries. Caches results. Removes `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` from spawned process environment to prevent nested session detection.
 
@@ -35,3 +37,4 @@ This is a macOS AppKit application that displays animated characters walking on 
 - **Window level**: Characters use `NSWindow.Level.statusBar + i` where i is sorted by x-position
 - **CLI discovery**: `ShellEnvironment.findBinary()` checks shell PATH first, then fallback paths like `~/.local/bin`, `/opt/homebrew/bin`
 - **Per-character config**: Each WalkerCharacter persists its own provider/size via UserDefaults with name-prefixed keys
+- **Session protocol**: All provider sessions implement `AgentSession` protocol with callbacks for `onText`, `onError`, `onToolUse`, `onToolResult`, `onTurnComplete`

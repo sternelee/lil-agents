@@ -54,7 +54,7 @@ enum AgentProvider: String, CaseIterable {
         case .opencode:
             return "To install, run this in Terminal:\n  curl -fsSL https://opencode.ai/install | bash"
         case .openclaw:
-            return "To install, run this in Terminal:\n  curl -fsSL https://openclaw.ai/install | bash"
+            return "To install, run this in Terminal:\n  curl -fsSL https://openclaw.ai/install | bash\n\nOr visit: https://docs.openclaw.ai/cli"
         }
     }
 

@@ -23,8 +23,7 @@ class OpenClawSession: AgentSession {
     // MARK: - Lifecycle
 
     func start() {
-        if let cached = Self.binaryPath {
-            Self.binaryPath = cached
+        if Self.binaryPath != nil {
             isRunning = true
             onSessionReady?()
             return
@@ -59,7 +58,9 @@ class OpenClawSession: AgentSession {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binaryPath)
-        proc.arguments = ["acp", "--json", message]
+        // Use --agent main as default, can be overridden via OPENCLAW_DEFAULT_AGENT env var
+        let defaultAgent = ProcessInfo.processInfo.environment["OPENCLAW_DEFAULT_AGENT"] ?? "main"
+        proc.arguments = ["agent", "--local", "--json", "--agent", defaultAgent, "--message", message]
         proc.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         proc.environment = ShellEnvironment.processEnvironment()
 
@@ -73,11 +74,6 @@ class OpenClawSession: AgentSession {
                 guard let self = self else { return }
                 self.process = nil
 
-                if !self.lineBuffer.isEmpty {
-                    self.parseLine(self.lineBuffer)
-                    self.lineBuffer = ""
-                }
-
                 if !self.currentResponseText.isEmpty {
                     self.history.append(AgentMessage(role: .assistant, text: self.currentResponseText))
                 }
@@ -86,6 +82,8 @@ class OpenClawSession: AgentSession {
                     self.isBusy = false
                     self.onTurnComplete?()
                 }
+
+                self.onProcessExit?()
             }
         }
 
@@ -104,7 +102,7 @@ class OpenClawSession: AgentSession {
             guard !data.isEmpty else { return }
             if let text = String(data: data, encoding: .utf8) {
                 DispatchQueue.main.async {
-                    self?.onError?(text)
+                    self?.processOutput(text)
                 }
             }
         }
@@ -135,21 +133,105 @@ class OpenClawSession: AgentSession {
 
     private func processOutput(_ text: String) {
         lineBuffer += text
-        while let newlineRange = lineBuffer.range(of: "\n") {
-            let line = String(lineBuffer[lineBuffer.startIndex..<newlineRange.lowerBound])
-            lineBuffer = String(lineBuffer[newlineRange.upperBound...])
-            if !line.isEmpty {
-                parseLine(line)
+
+        // Process all complete JSON objects in the buffer
+        while true {
+            // Find the start of a JSON object
+            guard let jsonStart = lineBuffer.range(of: "{") else {
+                // No JSON start found, clear the buffer (discard non-JSON output)
+                lineBuffer = ""
+                return
             }
+
+            // Remove everything before the JSON start (discard non-JSON prefix)
+            if jsonStart.lowerBound != lineBuffer.startIndex {
+                lineBuffer = String(lineBuffer[jsonStart.lowerBound...])
+            }
+
+            // Try to find the matching closing brace
+            guard let jsonEnd = findJSONEnd(in: lineBuffer) else {
+                // Incomplete JSON, wait for more data
+                return
+            }
+
+            // Extract the complete JSON
+            let jsonStr = String(lineBuffer[..<jsonEnd])
+            lineBuffer = String(lineBuffer[jsonEnd...])
+
+            // Parse and handle the JSON (only extract text, don't display raw JSON)
+            parseJSONResponse(jsonStr)
         }
     }
 
-    private func parseLine(_ line: String) {
+    private func findJSONEnd(in text: String) -> String.Index? {
+        var bracketCount = 0
+        var inString = false
+        var escape = false
+
+        for index in text.indices {
+            let char = text[index]
+
+            if escape {
+                escape = false
+                continue
+            }
+
+            if char == "\\" {
+                escape = true
+                continue
+            }
+
+            if char == "\"" {
+                inString.toggle()
+                continue
+            }
+
+            if !inString {
+                if char == "{" {
+                    bracketCount += 1
+                } else if char == "}" {
+                    bracketCount -= 1
+                    if bracketCount == 0 {
+                        return text.index(after: index)
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func parseJSONResponse(_ line: String) {
         guard let rawData = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: rawData) as? [String: Any] else {
+            // Debug: print failed parse attempts
+            #if DEBUG
+            print("[OpenClaw] Failed to parse JSON: \(line.prefix(100))")
+            #endif
             return
         }
 
+        // Handle openclaw agent --json format
+        if let payloads = json["payloads"] as? [[String: Any]] {
+            #if DEBUG
+            print("[OpenClaw] Found \(payloads.count) payload(s)")
+            #endif
+            for payload in payloads {
+                if let text = payload["text"] as? String, !text.isEmpty {
+                    #if DEBUG
+                    print("[OpenClaw] Extracted text: \(text)")
+                    #endif
+                    currentResponseText += text
+                    onText?(text)
+                }
+            }
+            // Done with payloads
+            isBusy = false
+            onTurnComplete?()
+            return
+        }
+
+        // Fallback: Handle streaming JSON format (type-based)
         let type = json["type"] as? String ?? ""
 
         switch type {

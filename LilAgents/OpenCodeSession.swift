@@ -23,8 +23,7 @@ class OpenCodeSession: AgentSession {
     // MARK: - Lifecycle
 
     func start() {
-        if let cached = Self.binaryPath {
-            Self.binaryPath = cached
+        if Self.binaryPath != nil {
             isRunning = true
             onSessionReady?()
             return
@@ -71,20 +70,17 @@ class OpenCodeSession: AgentSession {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.process = nil
-                
-                if !self.lineBuffer.isEmpty {
-                    self.parseLine(self.lineBuffer)
-                    self.lineBuffer = ""
-                }
-                
+
                 if !self.currentResponseText.isEmpty {
                     self.history.append(AgentMessage(role: .assistant, text: self.currentResponseText))
                 }
-                
+
                 if self.isBusy {
                     self.isBusy = false
                     self.onTurnComplete?()
                 }
+
+                self.onProcessExit?()
             }
         }
 
@@ -102,8 +98,19 @@ class OpenCodeSession: AgentSession {
             let data = handle.availableData
             guard !data.isEmpty else { return }
             if let text = String(data: data, encoding: .utf8) {
-                DispatchQueue.main.async {
-                    self?.onError?(text)
+                let filtered = text.components(separatedBy: "\n").filter { line in
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return false }
+                    if trimmed.hasPrefix("\u{001B}[") { return false }
+                    if trimmed.hasPrefix("✓") || trimmed.hasPrefix("→") ||
+                       trimmed.hasPrefix("◆") || trimmed.contains("[plugins]") ||
+                       trimmed.contains("[agent/") || trimmed.contains("[ws-") { return false }
+                    return true
+                }.joined(separator: "\n")
+                if !filtered.isEmpty {
+                    DispatchQueue.main.async {
+                        self?.onError?(filtered)
+                    }
                 }
             }
         }
@@ -146,6 +153,20 @@ class OpenCodeSession: AgentSession {
     private func parseLine(_ line: String) {
         guard let rawData = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: rawData) as? [String: Any] else {
+            return
+        }
+
+        if let payloads = json["payloads"] as? [[String: Any]] {
+            for payload in payloads {
+                if let text = payload["text"] as? String, !text.isEmpty {
+                    currentResponseText += text
+                    onText?(text)
+                }
+            }
+            if json["meta"] != nil {
+                isBusy = false
+                onTurnComplete?()
+            }
             return
         }
 
